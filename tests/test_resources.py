@@ -1,5 +1,5 @@
 from uuid import uuid4
-
+import time
 import requests
 
 
@@ -102,4 +102,167 @@ def test_get_resource_without_auth(existing_folder, disk_client):
     )
 
     assert response.status_code == 401
+    assert_error_response(response)
+
+
+def wait_for_operation(disk_client, href, timeout=15, interval=0.5):
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        response = disk_client.get_operation(href)
+        assert response.status_code == 200
+
+        data = response.json()
+        status = data["status"]
+
+        if status == "success":
+            return data
+
+        if status == "failed":
+            raise AssertionError(
+                f"Async operation failed: {data}"
+            )
+
+        time.sleep(interval)
+
+    raise AssertionError(
+        f"Async operation did not finish within {timeout} seconds"
+    )
+
+
+def wait_if_async(disk_client, response):
+    if response.status_code == 202:
+        data = response.json()
+
+        assert "href" in data
+
+        wait_for_operation(
+            disk_client,
+            data["href"],
+        )
+
+
+def test_copy_folder(disk_client, existing_folder):
+    destination = f"copy_{uuid4().hex[:12]}"
+
+    try:
+        response = disk_client.copy_resource(
+            existing_folder,
+            destination,
+        )
+
+        assert response.status_code in (201, 202)
+
+        wait_if_async(disk_client, response)
+
+        get_response = disk_client.get_resource(destination)
+        assert get_response.status_code == 200
+
+        data = get_response.json()
+
+        assert data["name"] == destination
+        assert data["type"] == "dir"
+
+    finally:
+        disk_client.delete_resource(
+            destination,
+            permanently=True,
+        )
+
+
+def test_copy_nonexistent_resource(disk_client):
+    source = f"missing_{uuid4().hex}"
+    destination = f"copy_{uuid4().hex}"
+
+    response = disk_client.copy_resource(
+        source,
+        destination,
+    )
+
+    assert response.status_code == 404
+    assert_error_response(response)
+
+
+def test_copy_to_existing_destination(
+    disk_client,
+    existing_folder,
+):
+    destination = f"existing_copy_{uuid4().hex[:12]}"
+
+    create_response = disk_client.create_folder(destination)
+    assert create_response.status_code == 201
+
+    try:
+        response = disk_client.copy_resource(
+            existing_folder,
+            destination,
+        )
+
+        assert response.status_code == 409
+        assert_error_response(response)
+
+    finally:
+        disk_client.delete_resource(
+            destination,
+            permanently=True,
+        )
+
+
+def test_copy_force_async(disk_client, existing_folder):
+    destination = f"async_copy_{uuid4().hex[:12]}"
+
+    try:
+        response = disk_client.copy_resource(
+            existing_folder,
+            destination,
+            force_async=True,
+        )
+
+        assert response.status_code == 202
+
+        data = response.json()
+        assert "href" in data
+
+        wait_for_operation(
+            disk_client,
+            data["href"],
+        )
+
+        get_response = disk_client.get_resource(destination)
+        assert get_response.status_code == 200
+
+    finally:
+        disk_client.delete_resource(
+            destination,
+            permanently=True,
+        )
+
+
+def test_delete_resource_permanently(
+    disk_client,
+    existing_folder,
+):
+    response = disk_client.delete_resource(
+        existing_folder,
+        permanently=True,
+    )
+
+    assert response.status_code in (202, 204)
+
+    wait_if_async(disk_client, response)
+
+    get_response = disk_client.get_resource(existing_folder)
+
+    assert get_response.status_code == 404
+
+
+def test_delete_nonexistent_resource(disk_client):
+    path = f"missing_{uuid4().hex}"
+
+    response = disk_client.delete_resource(
+        path,
+        permanently=True,
+    )
+
+    assert response.status_code == 404
     assert_error_response(response)

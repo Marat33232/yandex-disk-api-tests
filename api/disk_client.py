@@ -59,3 +59,9 @@ class YandexDiskClient:
             },
             timeout=10,
         )
+
+    def get_operation(self, href):
+        return self.session.get(
+            href,
+            timeout=10,
+        )
