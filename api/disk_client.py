@@ -10,15 +10,23 @@ class YandexDiskClient:
             "Authorization": f"OAuth {token}"
         })
 
-    def create_folder(self, path):
+    def create_folder(self, path=None):
+        params = {}
+
+        if path is not None:
+            params["path"] = path
+
         return self.session.put(
             f"{self.BASE_URL}/resources",
-            params={"path": path},
+            params=params,
             timeout=10,
         )
 
-    def get_resource(self, path, fields=None):
-        params = {"path": path}
+    def get_resource(self, path=None, fields=None):
+        params = {}
+
+        if path is not None:
+            params["path"] = path
 
         if fields:
             params["fields"] = fields
